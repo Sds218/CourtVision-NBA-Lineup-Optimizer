@@ -8,7 +8,9 @@ from modules.config import (
 )
 from modules.scoring import add_performance
 from modules.ranking import rank_players
-from modules.lineup import optimize_with_locked, similar_players
+from modules.lineup import (
+    optimize_with_locked, similar_players, build_roster
+)
 
 # PAGE CONFIGURATION
 st.set_page_config(
@@ -32,17 +34,25 @@ def load_players():
             "Demo Forward A", "Demo Forward B",
             "Demo Center A", "Demo Center B",
             "Demo Guard C", "Demo Forward C",
-            "Jayson Tatum"
+            "Jayson Tatum",
+            "Demo Role A", "Demo Role B", "Demo Role C", "Demo Role D",
+            "Demo Role E", "Demo Role F", "Demo Role G", "Demo Role H"
         ],
         "Position": [
             "PG", "SG", "SF", "PF",
             "C", "C", "PG", "SF",
-            "F"
+            "F",
+            "SG", "SF", "PF", "C",
+            "PG", "SF", "PF", "C"
         ],
-        "Salary": [32, 25, 38, 22, 35, 19, 16, 28, 58.4],
-        "Points": [28, 23, 30, 18, 26, 15, 17, 24, 21.8],
-        "Rebounds": [5, 4, 8, 9, 12, 10, 3, 7, 10.0],
-        "Assists": [9, 6, 5, 3, 4, 2, 8, 4, 5.3]
+        "Salary": [32, 25, 38, 22, 35, 19, 16, 28, 58.4,
+                   12, 8, 6, 5, 9, 4, 7, 3],
+        "Points": [28, 23, 30, 18, 26, 15, 17, 24, 21.8,
+                   12, 10, 9, 7, 11, 8, 9, 5],
+        "Rebounds": [5, 4, 8, 9, 12, 10, 3, 7, 10.0,
+                     3, 4, 6, 6, 2, 5, 7, 5],
+        "Assists": [9, 6, 5, 3, 4, 2, 8, 4, 5.3,
+                    3, 2, 1, 1, 4, 1, 1, 1]
     }
 
     return pd.DataFrame(sample), True
@@ -255,7 +265,7 @@ if st.session_state.get("run_optimizer"):
         out = optimize_with_locked(pool, budget, lineup_size, locked_names)
 
         if out["error"]:
-            st.error(out["error"])
+                        st.error(out["error"].replace("$", "\\$"))
         elif not out["dp"]["feasible"]:
             st.error(
                 "No lineup of that size fits the salary budget. "
@@ -349,6 +359,113 @@ if st.session_state.get("run_optimizer"):
                     f"{greedy['total_score']:.1f} vs "
                     f"{dp['total_score']:.1f} for the DP."
                 )
+
+st.divider()
+
+# FULL ROSTER BUILDER (starters + bench)
+st.header("🏟️ Full Roster Builder")
+
+st.write(
+    "Enter a team salary cap and get the best starters and bench. "
+    "Pick players you already own to keep them, and choose which "
+    "positions the open spots may be filled from."
+)
+
+roster_cap = st.number_input(
+    "Team salary cap ($ Millions)",
+    min_value=10.0,
+    max_value=400.0,
+    value=float(SALARY_CAP_M),
+    step=1.0
+)
+
+max_bench = max(0, len(players) - LINEUP_SIZE)
+r1, r2 = st.columns(2)
+bench_count = r1.number_input(
+    "Bench players",
+    min_value=0,
+    max_value=max_bench,
+    value=min(5, max_bench),
+    step=1
+)
+bench_weight = r2.slider(
+    "Bench importance (starters = 1.0)",
+    min_value=0.0,
+    max_value=1.0,
+    value=0.4,
+    step=0.05
+)
+
+owned = st.multiselect(
+    "Players I already own (kept on the roster)",
+    options=sorted(players["Player"]),
+    default=[]
+)
+
+fill_positions = st.multiselect(
+    "Fill open spots from these positions",
+    options=sorted(players["Position"].unique()),
+    default=sorted(players["Position"].unique())
+)
+
+if st.button("🏗️ Build Roster", type="primary"):
+    st.session_state["run_roster"] = True
+
+if st.session_state.get("run_roster"):
+    forced = list(dict.fromkeys(
+        [n for n in players["Player"] if n in UNTOUCHABLE] + owned
+    ))
+    built = build_roster(
+        players, roster_cap, LINEUP_SIZE, int(bench_count),
+        locked_names=forced, positions=fill_positions,
+        bench_weight=bench_weight
+    )
+
+    if built["error"]:
+                st.error(built["error"].replace("$", "\\$"))
+    else:
+        rr = built["result"]
+
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("Weighted Score", f"{rr['weighted_score']:.1f}")
+        b2.metric("Total Salary", f"${rr['total_salary']:.1f}M")
+        b3.metric("Cap Space Left", f"${rr['remaining_cap']:.1f}M")
+        b4.metric("Roster Size", rr["roster_size"])
+
+        kept_untouchable = [n for n in forced if n in UNTOUCHABLE]
+        if kept_untouchable:
+            st.warning(
+                "🔒 UNTOUCHABLE on roster: " + ", ".join(kept_untouchable)
+            )
+
+        def tag(row_name):
+            if row_name in UNTOUCHABLE:
+                return "🔒 Untouchable"
+            if row_name in owned:
+                return "✅ Owned"
+            return ""
+
+        starters_df = built["starters"].copy()
+        bench_df = built["bench"].copy()
+        for frame in (starters_df, bench_df):
+            frame["Status"] = frame["Player"].apply(tag)
+
+        st.subheader("Starters")
+        st.dataframe(
+            starters_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.subheader("Bench")
+        if bench_df.empty:
+            st.info("No bench players requested.")
+        else:
+            st.dataframe(
+                bench_df,
+                use_container_width=True,
+                hide_index=True
+            )
 
 st.divider()
 st.caption(

@@ -32,7 +32,7 @@ def _validate(scores, salaries, budget, k):
             raise ValueError("scores cannot be NaN")
 
 
-def _build_table(scores, costs, cap, k, slot_weights=None):
+def _build_table(scores, costs, cap, k, slot_weights=None, bonus=None):
     """Fill the DP table. Returns (dp, take, states).
 
     take[i][j][w] = 1 when taking player i improved dp[j][w]
@@ -54,6 +54,8 @@ def _build_table(scores, costs, cap, k, slot_weights=None):
             prev, cur, flags = dp[j - 1], dp[j], take[i][j]
             # score added if player i becomes the j-th pick (slot j)
             gain = v if slot_weights is None else v * slot_weights[j - 1]
+            if bonus is not None:
+                gain += bonus[i]     # big bonus = "must keep this player"
             for w in range(cap, c - 1, -1):         # downward as well
                 states += 1
                 candidate = prev[w - c] + gain       # take player i
@@ -61,7 +63,6 @@ def _build_table(scores, costs, cap, k, slot_weights=None):
                     cur[w] = candidate
                     flags[w] = 1
     return dp, take, states
-
 
 def _result(chosen, scores, salaries, budget, k, seconds, states, method):
     """Package a lineup into a dict the app can display."""
@@ -83,7 +84,7 @@ def _result(chosen, scores, salaries, budget, k, seconds, states, method):
 
 
 def knapsack_lineup(scores, salaries, budget, k, scale=10,
-                    slot_weights=None):
+                    slot_weights=None, bonus=None):
     """Optimal lineup of exactly k players within the budget.
 
     If no lineup of k players fits, 'feasible' is False and 'selected' is [].
@@ -101,7 +102,7 @@ def knapsack_lineup(scores, salaries, budget, k, scale=10,
                        time.perf_counter() - t0, 0, "knapsack_dp")
 
     costs, cap = _to_units(salaries, budget, scale)
-    dp, take, states = _build_table(scores, costs, cap, k, slot_weights)
+    dp, take, states = _build_table(scores, costs, cap, k, slot_weights, bonus)
     elapsed = time.perf_counter() - t0
 
     # No way to pick k players inside the budget
@@ -162,17 +163,28 @@ def optimize_lineup(df, budget, k, score_col="Performance",
             greedy_lineup(scores, salaries, budget, k))
 
 
+LOCK_BONUS = 1_000_000.0   # far bigger than any real score total
+
+
 def roster_lineup(scores, salaries, budget, starters=5, bench=5,
-                  bench_weight=0.4, scale=10):
+                  bench_weight=0.4, scale=10, locked=(), allowed=None):
     """Best roster of `starters` + `bench` players within the budget.
 
     A starter's score counts fully; a bench player's score counts
     `bench_weight` (0..1), because starters play more minutes.
 
-    Trick: if players are processed best-score-first, the j-th player picked
+    locked:  positions (in the input lists) of players who MUST be on the
+             roster (already owned, untouchable, ...).
+    allowed: if given, the only other positions that may be picked
+             (e.g. "only centers"). Locked players are always allowed.
+
+    Trick 1: if players are processed best-score-first, the j-th player picked
     is always the j-th best of the final roster. So the first `starters`
     picks are exactly the starters, and a plain knapsack with per-slot
     weights (1.0 for starter slots, bench_weight for bench slots) is enough.
+
+    Trick 2: a locked player gets a huge fixed bonus inside the table, so
+    every optimal roster keeps him. We then check he really fit the budget.
     """
     if not 0 <= bench_weight <= 1:
         raise ValueError("bench_weight must be between 0 and 1")
@@ -181,24 +193,42 @@ def roster_lineup(scores, salaries, budget, starters=5, bench=5,
     k = starters + bench
     _validate(scores, salaries, budget, k)
 
+    locked = list(dict.fromkeys(locked))          # unique, keep order
+    if any(not 0 <= i < len(scores) for i in locked):
+        raise ValueError("locked contains a player that does not exist")
+    if len(locked) > k:
+        raise ValueError("more locked players than roster spots")
+
     # best score first; ties -> cheaper first (same rule as ranking.py)
     from modules.ranking import merge_sort
     items = [{"name": str(i), "salary": salaries[i], "score": scores[i],
-              "i": i} for i in range(len(scores))]
+              "i": i} for i in range(len(scores))
+             if allowed is None or i in allowed or i in locked]
     order = [p["i"] for p in merge_sort(items)]
 
     slot_weights = [1.0] * starters + [bench_weight] * bench
+    bonus = [LOCK_BONUS if i in locked else 0.0 for i in order]
     res = knapsack_lineup([scores[i] for i in order],
                           [salaries[i] for i in order],
-                          budget, k, scale, slot_weights)
+                          budget, k, scale, slot_weights, bonus)
 
     # sorted positions -> original positions; ascending = best score first
     picked = [order[p] for p in res["selected"]]
+    if res["feasible"] and not all(i in picked for i in locked):
+        # the locked players alone do not fit the budget
+        picked, res["feasible"] = [], False
     res["starters"] = picked[:starters]
     res["bench"] = picked[starters:]
     res["selected"] = sorted(picked)
     res["weighted_score"] = round(
         sum(scores[i] for i in res["starters"])
         + bench_weight * sum(scores[i] for i in res["bench"]), 6)
+    # recompute totals from the real (un-bonused) numbers
+    res["total_score"] = round(sum(scores[i] for i in picked), 6)
+    res["total_salary"] = round(sum(salaries[i] for i in picked), 6)
+    res["remaining_cap"] = round(budget - res["total_salary"], 6)
+    res["roster_size"] = len(picked)
+    res["constraints_ok"] = (res["feasible"] and len(picked) == k
+                             and res["total_salary"] <= budget + EPS)
     res["method"] = "knapsack_roster"
     return res
