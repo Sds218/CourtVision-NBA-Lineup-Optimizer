@@ -168,7 +168,7 @@ if untouchables_here:
 
 st.dataframe(
     filtered,
-    width="stretch",
+    use_container_width=True,
     hide_index=True
 )
 
@@ -190,7 +190,7 @@ if not filtered.empty:
         )
         st.plotly_chart(
             fig_performance,
-            width="stretch"
+            use_container_width=True
         )
 
     with right:
@@ -206,7 +206,7 @@ if not filtered.empty:
         )
         st.plotly_chart(
             fig_salary,
-            width="stretch"
+            use_container_width=True
         )
 else:
     st.info("No players match your filters.")
@@ -227,7 +227,7 @@ if not filtered.empty:
     )
     st.dataframe(
         ranked_df,
-        width="stretch",
+        use_container_width=True,
         hide_index=True
     )
 else:
@@ -294,7 +294,7 @@ if st.session_state.get("run_optimizer"):
             st.subheader("Selected Lineup")
             st.dataframe(
                 dp["lineup"].sort_values("Performance", ascending=False),
-                width="stretch",
+                width="stretch",     
                 hide_index=True
             )
 
@@ -320,7 +320,7 @@ if st.session_state.get("run_optimizer"):
                 )
                 st.dataframe(
                     similar,
-                    width="stretch",
+                    use_container_width=True,
                     hide_index=True
                 )
 
@@ -344,7 +344,7 @@ if st.session_state.get("run_optimizer"):
                         "Runtime (ms)": round(greedy["runtime_s"] * 1000, 3),
                     },
                 ]),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True
             )
 
@@ -453,7 +453,7 @@ if st.session_state.get("run_roster"):
         st.subheader("Starters")
         st.dataframe(
             starters_df,
-            width="stretch",
+            use_container_width=True,
             hide_index=True
         )
 
@@ -463,7 +463,7 @@ if st.session_state.get("run_roster"):
         else:
             st.dataframe(
                 bench_df,
-                width="stretch",
+                use_container_width=True,
                 hide_index=True
             )
 
