@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
+from modules.search_filters import filter_players
 
 from modules.config import (
     LINEUP_SIZE, SALARY_CAP_M, DEFAULT_BUDGET_M, UNTOUCHABLE
@@ -129,16 +130,7 @@ search = st.sidebar.text_input(
 )
 
 # FILTER DATA
-filtered = players[
-    players["Position"].isin(positions)
-].copy()
-
-if search:
-    filtered = filtered[
-        filtered["Player"].str.contains(
-            search, case=False, na=False, regex=False
-        )
-    ]
+filtered = filter_players(players, positions, search)
 
 # SUMMARY METRICS
 col1, col2, col3, col4 = st.columns(4)
