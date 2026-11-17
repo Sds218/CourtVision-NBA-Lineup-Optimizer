@@ -167,3 +167,60 @@ def build_roster(df, cap, starters, bench, locked_names=(), positions=None,
     return {"error": None, "result": res,
             "starters": start_df.reset_index(drop=True),
             "bench": bench_df.reset_index(drop=True)}
+
+
+def greedy_roster(df, cap, starters, bench, locked_names=(), positions=None,
+                  bench_weight=0.4, score_col="Performance",
+                  salary_col="Salary"):
+    """Greedy baseline for the full roster, to compare with build_roster.
+
+    Owned (locked) players go in first. The open spots are then filled by
+    best score-per-salary while they fit under the cap. The best scorers
+    become starters, the rest the bench. Not optimal, and it can end up
+    with fewer players than the roster needs.
+    """
+    df = df.reset_index(drop=True)
+    k = starters + bench
+    names = df["Player"].tolist()
+    locked = [names.index(n) for n in dict.fromkeys(locked_names)
+              if n in names]
+
+    chosen = list(locked)
+    spent = float(df.loc[locked, salary_col].sum()) if locked else 0.0
+
+    def ratio(i):
+        s = float(df.loc[i, salary_col])
+        return float(df.loc[i, score_col]) / s if s > 0 else float("inf")
+
+    taken = set(locked)
+    pool = [i for i in range(len(df))
+            if i not in taken
+            and (not positions or df.loc[i, "Position"] in positions)]
+    pool.sort(key=lambda i: (-ratio(i), i))
+
+    for i in pool:
+        if len(chosen) >= k:
+            break
+        s = float(df.loc[i, salary_col])
+        if spent + s <= cap + EPS:
+            chosen.append(i)
+            spent += s
+
+    team = df.iloc[chosen].copy()
+    team = team.sort_values(score_col, ascending=False, kind="stable")
+    start_df = team.iloc[:starters].copy()
+    bench_df = team.iloc[starters:].copy()
+    start_df.insert(0, "Role", "Starter")
+    bench_df.insert(0, "Role", "Bench")
+
+    weighted = (float(start_df[score_col].sum())
+                + bench_weight * float(bench_df[score_col].sum()))
+    return {
+        "starters": start_df.reset_index(drop=True),
+        "bench": bench_df.reset_index(drop=True),
+        "weighted_score": round(weighted, 6),
+        "total_salary": round(spent, 6),
+        "remaining_cap": round(cap - spent, 6),
+        "roster_size": len(chosen),
+        "full": len(chosen) == k,
+    }
