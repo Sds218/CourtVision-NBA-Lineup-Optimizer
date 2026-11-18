@@ -2,7 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from pathlib import Path
+
 import unicodedata
+
+from modules.search_filters import filter_players
+
 
 from modules.config import (
     LINEUP_SIZE, SALARY_CAP_M, DEFAULT_BUDGET_M, UNTOUCHABLE
@@ -187,16 +191,7 @@ search = st.sidebar.text_input(
 )
 
 # FILTER DATA
-filtered = players[
-    players["Position"].isin(positions)
-].copy()
-
-if search:
-    filtered = filtered[
-        filtered["Player"].str.contains(
-            search, case=False, na=False, regex=False
-        )
-    ]
+filtered = filter_players(players, positions, search)
 
 # SUMMARY METRICS
 col1, col2, col3, col4 = st.columns(4)
@@ -346,11 +341,16 @@ if st.session_state.get("run_optimizer"):
             st.subheader("Selected Lineup")
             lineup_df = dp["lineup"].copy()
             st.dataframe(
+
                 add_photos(
                     lineup_df.sort_values("Performance", ascending=False)
                 ),
                 column_config=PHOTO_CONFIG,
                 use_container_width=True,
+
+                dp["lineup"].sort_values("Performance", ascending=False),
+                width="stretch",     
+
                 hide_index=True
             )
 
